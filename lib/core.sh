@@ -24,6 +24,12 @@ VCB_LIB_DIR="${VCB_LIB_DIR:-}"
 YES_MODE=0
 FORCE_RECONFIGURE=0
 PROVIDER_OVERRIDE=""
+RECONFIGURE_SECTION=""
+
+# Sections accepted by --reconfigure. Order here is the order printed by
+# `--reconfigure help`. Adding a new section means adding a case arm in
+# run_reconfigure in bootstrap.sh.
+VCB_RECONFIGURE_SECTIONS=(provider sources policy schedule notifier)
 
 # Runtime globals populated by phases. Declared here so `set -u` is happy
 # even if a phase skips setting one.
@@ -78,6 +84,18 @@ parse_args() {
             -y|--yes)              YES_MODE=1 ;;
             --force-reconfigure)   FORCE_RECONFIGURE=1 ;;
             --provider)            PROVIDER_OVERRIDE=$2; shift ;;
+            --reconfigure)
+                if (( $# < 2 )); then
+                    err "--reconfigure requires a SECTION (use '--reconfigure help')"
+                    exit 2
+                fi
+                RECONFIGURE_SECTION=$2
+                shift
+                if [[ "$RECONFIGURE_SECTION" == "help" || "$RECONFIGURE_SECTION" == "list" ]]; then
+                    print_reconfigure_help
+                    exit 0
+                fi
+                ;;
             --state-file)          STATE_FILE=$2; STATE_DIR=$(dirname "$2"); shift ;;
             -v|--version)          printf '%s %s\n' "$VCB_NAME" "$VCB_VERSION"; exit 0 ;;
             -h|--help)             print_help; exit 0 ;;
@@ -97,9 +115,41 @@ Flags:
   -y, --yes                Accept all defaults from state file (non-interactive).
   --force-reconfigure      Re-run provider config even if a remote already exists.
   --provider NAME          Skip the provider menu, use this provider directly.
+  --reconfigure SECTION    Only re-run the phases for SECTION, then re-render
+                           the backup script and systemd units. Requires a
+                           prior successful bootstrap. Use '--reconfigure help'
+                           to list valid sections.
   --state-file PATH        Use an alternate state file (default: ${STATE_FILE}).
   -v, --version            Print version and exit.
   -h, --help               Print this help and exit.
+EOF
+}
+
+print_reconfigure_help() {
+    cat <<EOF
+${VCB_NAME} ${VCB_VERSION} — --reconfigure sections
+
+Re-run only the phases for a single section of a previously bootstrapped
+install. Re-renders /usr/local/bin/vcb-backup.sh and the systemd units
+when done.
+
+Usage: sudo ./bootstrap.sh --reconfigure SECTION
+
+Sections:
+  provider    Pick a new destination or re-auth the current one.
+              Runs: select provider, prompt config, install provider deps,
+              configure rclone remote, verify.
+  sources     Change which filesystem paths and databases are backed up.
+              Runs: source select + db discovery, rewrite db.conf.
+  policy      Change the destination folder, retention days, or backup mode
+              (mirror vs snapshot). Does not touch the schedule.
+  schedule    Change the OnCalendar schedule only.
+  notifier    Pick a different notification channel or update its settings.
+              Rewrites notifications.conf.
+
+Examples:
+  sudo ./bootstrap.sh --reconfigure schedule
+  sudo ./bootstrap.sh --reconfigure provider
 EOF
 }
 

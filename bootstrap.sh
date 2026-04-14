@@ -184,8 +184,10 @@ phase_6_configure_remote() {
 }
 
 # ============================================================================
-# Phase 7 — collect top-level backup config (DEST, retention, schedule, mode)
+# Phase 7 — collect top-level backup config (DEST, retention, mode)
 # ============================================================================
+# Split into two functions so --reconfigure policy and --reconfigure schedule
+# can target them independently. The full-bootstrap flow runs both in sequence.
 phase_7_collect_backup_config() {
     banner "Backup policy"
 
@@ -197,7 +199,10 @@ phase_7_collect_backup_config() {
     ask_choice  BACKUP_MODE "Backup mode" \
         "mirror|Mirror files as-is (recommended for SQL dumps)" \
         "snapshot|Timestamped tar.gz archive (recommended for system configs)"
+}
 
+phase_7a_schedule() {
+    banner "Schedule"
     schedule_prompt
 }
 
@@ -316,9 +321,68 @@ Docs:
 EOF
 }
 
+# ============================================================================
+# --reconfigure dispatcher: re-run just the phases for one section, then
+# re-render the backup script + systemd units. Requires prior state.
+# Adding a section: update VCB_RECONFIGURE_SECTIONS in lib/core.sh AND add
+# a case arm below AND document it in print_reconfigure_help.
+# ============================================================================
+run_reconfigure() {
+    local section=$1 s valid=0
+    for s in "${VCB_RECONFIGURE_SECTIONS[@]}"; do
+        [[ "$s" == "$section" ]] && { valid=1; break; }
+    done
+    if (( ! valid )); then
+        err "unknown --reconfigure section: '${section}'"
+        err "valid sections: ${VCB_RECONFIGURE_SECTIONS[*]}"
+        err_code VCB-BOOT-080 "unknown reconfigure section '${section}'"
+    fi
+    if [[ ! -r "$STATE_FILE" ]]; then
+        err_code VCB-BOOT-080 \
+            "no prior state at $STATE_FILE — run a full bootstrap first"
+    fi
+
+    # Environment detection is always needed so template rendering in
+    # phase_8 has HOSTNAME_LC / PUBLIC_IP / PKG_MGR available.
+    phase_1_detect
+
+    case "$section" in
+        provider)
+            phase_3_select_provider
+            phase_4_provider_prompt
+            phase_5_install_deps
+            phase_6_configure_remote
+            ;;
+        sources)
+            phase_5b_source_select
+            phase_5c_source_deps
+            phase_7c_write_db_conf
+            ;;
+        policy)
+            phase_7_collect_backup_config
+            ;;
+        schedule)
+            phase_7a_schedule
+            ;;
+        notifier)
+            phase_7d_notifiers
+            ;;
+    esac
+
+    phase_8_install_artifacts
+    phase_10_summary
+    state_save
+    log "reconfigure(${section}) complete"
+}
+
 # ----------------------------------------------------------------------------
 # Run all phases.
 # ----------------------------------------------------------------------------
+if [[ -n "$RECONFIGURE_SECTION" ]]; then
+    run_reconfigure "$RECONFIGURE_SECTION"
+    exit 0
+fi
+
 phase_1_detect
 phase_2_confirm_env
 phase_3_select_provider
@@ -328,6 +392,7 @@ phase_5b_source_select
 phase_5c_source_deps
 phase_6_configure_remote
 phase_7_collect_backup_config
+phase_7a_schedule
 phase_7c_write_db_conf
 phase_7d_notifiers
 phase_8_install_artifacts

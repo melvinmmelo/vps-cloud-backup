@@ -125,6 +125,17 @@ you typed isn't valid systemd calendar syntax.
 **Fix:** test it with `systemd-analyze calendar '<your-expression>'`.
 Pick one of the non-custom presets if you're not sure.
 
+### VCB-BOOT-080 — invalid --reconfigure section or missing prior state
+
+**Cause:** you ran `sudo ./bootstrap.sh --reconfigure SECTION` with a
+section name the bootstrap doesn't recognise, or you ran it before ever
+running a full bootstrap (so there's no `/etc/vps-cloud-backup/bootstrap.env`
+to seed defaults from).
+**Fix:** run `sudo ./bootstrap.sh --reconfigure help` to see the list of
+valid sections. If you've never bootstrapped this VPS before, run a full
+`sudo ./bootstrap.sh` once first; `--reconfigure` only edits an existing
+install.
+
 ### VCB-BOOT-999 — unexpected error, see trap output
 
 **Cause:** an uncaught bash error. The trap handler printed the file

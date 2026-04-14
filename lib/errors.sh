@@ -21,6 +21,7 @@ declare -gA VCB_ERROR_CODES=(
     [VCB-BOOT-051]="database client tool missing after install"
     [VCB-BOOT-060]="notifications.conf could not be written with correct permissions"
     [VCB-BOOT-070]="invalid OnCalendar expression"
+    [VCB-BOOT-080]="invalid --reconfigure section or missing prior state"
     [VCB-BOOT-999]="unexpected error, see trap output"
 )
 
