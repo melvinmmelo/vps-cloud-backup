@@ -32,6 +32,8 @@ source "${VCB_LIB_DIR}/detect.sh"
 # shellcheck disable=SC1091
 source "${VCB_LIB_DIR}/pkg.sh"
 # shellcheck disable=SC1091
+source "${VCB_LIB_DIR}/system_snapshot.sh"
+# shellcheck disable=SC1091
 source "${VCB_LIB_DIR}/provider_api.sh"
 # shellcheck disable=SC1091
 source "${VCB_LIB_DIR}/sources.sh"
@@ -104,6 +106,17 @@ EOF
         warn "aborted by user"
         exit 0
     fi
+}
+
+# ============================================================================
+# Phase 2b — force a pre-install system snapshot (mandatory safety net)
+# ============================================================================
+# Runs after the user consents to proceed but before phase_3 touches
+# anything. Creates a timeshift snapshot so the whole install can be
+# rolled back with `sudo timeshift --restore` if it misbehaves.
+phase_2b_system_snapshot() {
+    banner "Pre-install system snapshot"
+    system_snapshot_create
 }
 
 # ============================================================================
@@ -306,6 +319,7 @@ ${_C_GREEN}${_C_BOLD}Bootstrap complete.${_C_RESET}
   destination      : ${PROVIDER_NAME} -> ${DEST}
   db dumper        : $([[ "${INCLUDE_DATABASES:-n}" == "y" ]] && echo "enabled, $DB_CONF_FILE" || echo "disabled")
   notifications    : $([[ -n "${SELECTED_NOTIFIERS:-}" ]] && echo "$SELECTED_NOTIFIERS, $NOTIFICATIONS_CONF_FILE" || echo "disabled")
+  pre-install snap : $([[ -n "${SYSTEM_SNAPSHOT_LABEL:-}" ]] && echo "${SYSTEM_SNAPSHOT_LABEL} (restore: sudo timeshift --restore)" || echo "n/a (reconfigure run — no new snapshot)")
   state            : ${STATE_FILE}
 
 Useful commands:
@@ -390,6 +404,7 @@ fi
 
 phase_1_detect
 phase_2_confirm_env
+phase_2b_system_snapshot
 phase_3_select_provider
 phase_4_provider_prompt
 phase_5_install_deps

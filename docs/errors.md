@@ -56,6 +56,37 @@ care about the public IP tag, fix network egress and re-run.
 **Fix:** check for dpkg locks (`ps aux | grep dpkg`), broken repos, or
 network issues. Re-run the bootstrap; installs are idempotent.
 
+### VCB-BOOT-006 — timeshift could not be installed for pre-install snapshot
+
+**Cause:** phase 2b tried to install `timeshift` to take a mandatory
+rollback snapshot before touching the system, but the package manager
+returned non-zero. On Ubuntu, timeshift lives in the `universe`
+component. On RHEL/Rocky/Alma/CentOS it comes from EPEL. On very
+minimal cloud images neither is enabled by default.
+**Fix:**
+- **Ubuntu / Debian:** `sudo add-apt-repository universe && sudo apt-get update`
+- **RHEL / Rocky / Alma / CentOS:** `sudo dnf install -y epel-release`
+- **Fedora:** timeshift is in the main repos — investigate dnf repo errors.
+
+Install manually (`sudo apt-get install -y timeshift` or
+`sudo dnf install -y timeshift`) and re-run the bootstrap. The
+pre-install snapshot is not optional: if your environment cannot run
+timeshift at all, open an issue describing the platform.
+
+### VCB-BOOT-007 — timeshift failed to create pre-install snapshot
+
+**Cause:** timeshift is installed but `timeshift --create` returned
+non-zero. Common reasons: insufficient free space on the root
+filesystem, no backup target ever configured, or the root filesystem
+is something timeshift cannot snapshot (overlayfs, containerised root,
+read-only root).
+**Symptoms:** `timeshift --check` reports no valid target, or `df -h /`
+shows the root filesystem near capacity.
+**Fix:** free space first (`sudo apt-get autoremove && sudo apt-get clean`),
+then run `sudo timeshift --check` and follow its guidance to pick a
+backup target. Re-run the bootstrap once `sudo timeshift --create` works
+on its own.
+
 ### VCB-BOOT-010 — rclone config produced no remote
 
 **Cause:** you cancelled out of `rclone config` or the remote was never saved.
