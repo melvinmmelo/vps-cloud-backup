@@ -1,0 +1,19 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+
+# Editor state
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS detritus
+.DS_Store
+Thumbs.db
+
+# Local test artifacts
+/tmp/
+test/tmp/

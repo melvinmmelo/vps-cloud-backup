@@ -1,0 +1,144 @@
+#!/usr/bin/env bash
+# @PROVIDER_NAME@ backup — managed by vps-cloud-backup/bootstrap.sh.
+# Re-run the bootstrap to regenerate this file, or edit the variables below.
+set -euo pipefail
+
+REMOTE_URI="@REMOTE_URI@"
+RETENTION_DAYS="@RETENTION_DAYS@"
+BACKUP_MODE="@BACKUP_MODE@"
+HOST="@HOST@"
+PUBLIC_IP="@PUBLIC_IP@"
+LOG="@LOG_PATH@"
+
+INCLUDE_DATABASES="@INCLUDE_DATABASES@"
+STAGING_DIR="@STAGING_DIR@"
+DB_CONF="@DB_CONF@"
+
+NOTIFY_ENABLED="@NOTIFY_ENABLED@"
+NOTIFICATIONS_CONF="@NOTIFICATIONS_CONF@"
+
+read -r -a SOURCES <<< "@SOURCES_STR@"
+
+STAMP=$(date +%Y-%m-%d_%H%M%S)
+RUN_OK=1
+RUN_PARTIAL=0
+RUN_SUMMARY=""
+
+notify() {
+    # notify EVENT SEVERITY SUBJECT BODY
+    [[ "$NOTIFY_ENABLED" == "1" ]] || return 0
+    local event=$1 severity=$2 subject=$3 body=$4
+    PYTHONPATH=/usr/local/lib python3 -m vcb_notify \
+        --config "$NOTIFICATIONS_CONF" \
+        send --event "$event" --severity "$severity" \
+        --subject "$subject" --body "$body" \
+        --context "host=$HOST" --context "ip=$PUBLIC_IP" >/dev/null 2>&1 || true
+}
+
+on_exit() {
+    local rc=$?
+    if [[ $rc -ne 0 && $RUN_OK -eq 1 ]]; then
+        notify "backup.failure" "error" \
+            "backup FAILED on $HOST" \
+            "The backup script exited with code $rc. See $LOG."
+    fi
+    return $rc
+}
+trap on_exit EXIT
+
+{
+    printf '===== %s starting backup on %s (%s) via @PROVIDER_NAME@ =====\n' \
+        "$(date -Is)" "$HOST" "$PUBLIC_IP"
+
+    # -----------------------------------------------------------------
+    # 1. Dump databases (if enabled) before anything else.
+    # -----------------------------------------------------------------
+    if [[ "$INCLUDE_DATABASES" == "y" ]]; then
+        printf '--- dumping databases (Python dumper)\n'
+        mkdir -p "$STAGING_DIR"
+        chmod 700 "$STAGING_DIR"
+        set +e
+        PYTHONPATH=/usr/local/lib python3 -m vcb_dumper run \
+            --config "$DB_CONF" \
+            --staging "$STAGING_DIR" \
+            --stamp "$STAMP"
+        dumper_rc=$?
+        set -e
+        case "$dumper_rc" in
+            0) printf 'dumper: all databases dumped cleanly\n' ;;
+            1) printf 'dumper: WARNING — partial success, continuing with upload\n'
+               RUN_PARTIAL=1 ;;
+            2) printf 'dumper: FATAL — aborting before upload\n'
+               RUN_OK=0
+               notify "backup.failure" "error" \
+                    "dumper FATAL on $HOST" \
+                    "Python dumper exited 2 — see $LOG and $STAGING_DIR/summary.json"
+               exit 2 ;;
+            *) printf 'dumper: unexpected exit %d — aborting\n' "$dumper_rc"
+               RUN_OK=0
+               exit 2 ;;
+        esac
+    fi
+
+    # -----------------------------------------------------------------
+    # 2. Upload to the configured cloud destination.
+    # -----------------------------------------------------------------
+    if [[ "$BACKUP_MODE" == "mirror" ]]; then
+        for src in "${SOURCES[@]}"; do
+            if [[ ! -e "$src" ]]; then
+                printf 'WARNING: source %q does not exist — skipping\n' "$src"
+                continue
+            fi
+            base=$(basename "$src")
+            printf '--- mirror %q -> %s/%s/\n' "$src" "$REMOTE_URI" "$base"
+            rclone copy "$src" "${REMOTE_URI}/${base}/" \
+                --log-level INFO --stats 30s --transfers 4
+        done
+
+        rclone delete "$REMOTE_URI/" \
+            --min-age "${RETENTION_DAYS}d" --log-level INFO --rmdirs || true
+
+    else
+        TMPDIR=$(mktemp -d)
+        ARCHIVE="${TMPDIR}/vcb-${HOST}-${STAMP}.tar.gz"
+        printf '--- snapshot -> %s\n' "$ARCHIVE"
+
+        tar_rc=0
+        tar --warning=no-file-changed --ignore-failed-read \
+            -czf "$ARCHIVE" "${SOURCES[@]}" || tar_rc=$?
+        if [[ "$tar_rc" -gt 1 ]]; then
+            printf 'tar failed with exit code %d\n' "$tar_rc"
+            rm -rf "$TMPDIR"
+            RUN_OK=0
+            exit "$tar_rc"
+        fi
+        ls -lh "$ARCHIVE"
+
+        rclone copy "$ARCHIVE" "${REMOTE_URI}/" \
+            --log-level INFO --stats 30s --transfers 2
+        rm -rf "$TMPDIR"
+
+        rclone delete "$REMOTE_URI/" \
+            --min-age "${RETENTION_DAYS}d" --log-level INFO || true
+    fi
+
+    # -----------------------------------------------------------------
+    # 3. Clean up staging on success.
+    # -----------------------------------------------------------------
+    if [[ "$INCLUDE_DATABASES" == "y" ]]; then
+        find "$STAGING_DIR" -mindepth 1 -delete 2>/dev/null || true
+        printf '--- staging cleared\n'
+    fi
+
+    printf '===== %s backup complete =====\n' "$(date -Is)"
+
+    if [[ $RUN_PARTIAL -eq 1 ]]; then
+        notify "backup.partial" "warning" \
+            "backup PARTIAL on $HOST" \
+            "Upload completed but one or more database dumps failed. See $LOG."
+    else
+        notify "backup.success" "info" \
+            "backup OK on $HOST" \
+            "Backup finished cleanly. Destination: ${REMOTE_URI}"
+    fi
+} >> "$LOG" 2>&1
