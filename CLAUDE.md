@@ -19,6 +19,10 @@ destination via rclone, and emails them on failure.
 - A Python project with bash glue — it's a **bash project with a small,
   well-defined Python subsystem** for database dumping and notifications.
 
+**Re-running:** `sudo ./bootstrap.sh --reconfigure [SECTION]` re-runs a single
+section (provider, sources, schedule, notifiers, ...) against an existing
+install without redoing the full 10 phases or taking a new timeshift snapshot.
+
 ## Three independent abstractions
 
 Every new feature fits into one of three buckets:
@@ -37,7 +41,7 @@ edit.** Dropping a new file in the right directory registers the plugin.
 ## Directory map (canonical)
 
 ```
-bootstrap.sh                         top-level orchestrator (10 phases)
+bootstrap.sh                         top-level orchestrator (phases 1–10 + sub-phases 2b/5b/5c/7a/7c/7d)
 uninstall.sh                         reverses the bootstrap
 lib/                                 bash helpers (sourced by bootstrap.sh)
   core.sh              globals, traps, parse_args, render_template
@@ -48,6 +52,7 @@ lib/                                 bash helpers (sourced by bootstrap.sh)
   secure_conf.sh       write_secure_conf (atomic, 0600 root:root)
   detect.sh            env detection: distro, pkgmgr, IP, cloud, ...
   pkg.sh               distro-agnostic install helpers
+  system_snapshot.sh   pre-install timeshift snapshot (phase 2b)
   schedule.sh          schedule menu + OnCalendar rendering
   systemd.sh           systemd unit installation
   backup_script.sh     renders /usr/local/bin/vcb-backup.sh
@@ -274,25 +279,18 @@ bash→Python channel, add a new config-file key first.
 
 ## Testing before committing
 
-For now (v1):
-
 ```bash
-# Bash syntax check
-for f in bootstrap.sh uninstall.sh lib/*.sh lib/providers/*.sh \
-         lib/sources/*.sh lib/notifiers/*.sh lib/db/*.sh; do
-    bash -n "$f" || echo "FAIL: $f"
-done
+# Shell: bash -n on every file, plus shellcheck if installed
+bash test/shellcheck.sh
 
-# Python syntax check
+# Python: stdlib compileall on both packages
 python3 -m compileall -q vcb_dumper vcb_notify
 ```
 
-A shellcheck + bats + Dockerized dry-run suite is planned for v1.1.
-When adding new code, at minimum:
+A bats + Dockerized dry-run suite is planned for v1.1. When adding new code,
+at minimum:
 
-- Run both commands above.
-- If touching Python: make sure `python3 -m compileall -q vcb_dumper vcb_notify`
-  is silent.
+- Run both commands above; both must be silent.
 - If touching prompts / state: do a dry re-run of the bootstrap on a
   VM and verify the state file round-trips correctly.
 

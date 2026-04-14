@@ -60,6 +60,13 @@ sudo ./bootstrap.sh
 
 That's it. Now you answer the prompts.
 
+> **Safety net:** before installing anything, the bootstrap creates an
+> on-demand `timeshift` snapshot of the whole system. If anything goes
+> sideways you can roll back with `sudo timeshift --restore` and pick the
+> snapshot tagged `vps-cloud-backup pre-install snapshot`. The snapshot
+> step is skipped on `--reconfigure` re-runs (which only edit existing
+> config and don't warrant a fresh rollback point).
+
 ---
 
 ## What the prompts look like
@@ -236,8 +243,12 @@ If those are empty, the backup went somewhere else — most likely you
 chose the wrong Google account during the OAuth flow. Fix it:
 
 ```bash
-sudo ./bootstrap.sh --force-reconfigure
+sudo ./bootstrap.sh --reconfigure provider
 ```
+
+(`--reconfigure provider` re-runs only the destination phases and
+re-auths rclone. The older `--force-reconfigure` flag does the same
+thing as part of a full bootstrap re-run — either works.)
 
 ### "The bootstrap failed somewhere in the middle"
 
@@ -263,8 +274,20 @@ Full troubleshooting in [`docs/notifiers/gmail.md`](docs/notifiers/gmail.md#trou
 
 ### "I need to change the schedule / retention / source paths"
 
-Re-run `sudo ./bootstrap.sh` — it remembers your old answers and you
-only need to change the one you want different.
+Re-run only the section you want to change instead of the whole bootstrap:
+
+```bash
+sudo ./bootstrap.sh --reconfigure schedule    # new OnCalendar / frequency
+sudo ./bootstrap.sh --reconfigure policy      # retention, dest folder, mirror vs tar.gz
+sudo ./bootstrap.sh --reconfigure sources     # filesystem paths + which DBs
+sudo ./bootstrap.sh --reconfigure notifier    # email recipient, App Password, ...
+sudo ./bootstrap.sh --reconfigure provider    # switch destination or re-auth
+```
+
+Run `sudo ./bootstrap.sh --reconfigure help` to see the full list. Plain
+`sudo ./bootstrap.sh` (no flags) still works — it remembers your old
+answers and you only need to change the one you want different — but
+`--reconfigure` is faster and skips the snapshot step.
 
 ### "I want to completely remove vps-cloud-backup"
 
