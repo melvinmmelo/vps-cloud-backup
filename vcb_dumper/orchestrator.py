@@ -10,6 +10,7 @@ DumperRun, writes summary.json, and returns an exit code.
 from __future__ import annotations
 
 import logging
+import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -52,19 +53,26 @@ class DumpOrchestrator:
               dumps failed but for recoverable per-engine reasons
           2 — catastrophic failure: config error, unwritable staging, etc.
         """
-        self._assert_staging_writable()
-        dumpers = self._build_dumpers()
+        # SQL dump files contain raw database rows. Force root-only perms
+        # for everything the run creates (staging subdirs, .sql.gz files,
+        # summary.json) regardless of the inherited process umask.
+        prev_umask = os.umask(0o077)
+        try:
+            self._assert_staging_writable()
+            dumpers = self._build_dumpers()
 
-        if not dumpers:
-            self._logger.info("no engines enabled — nothing to dump")
+            if not dumpers:
+                self._logger.info("no engines enabled — nothing to dump")
+                self._write_summary()
+                return 0
+
+            for dumper in dumpers:
+                self._process_engine(dumper)
+
             self._write_summary()
-            return 0
-
-        for dumper in dumpers:
-            self._process_engine(dumper)
-
-        self._write_summary()
-        return self._run_state.overall_exit_code()
+            return self._run_state.overall_exit_code()
+        finally:
+            os.umask(prev_umask)
 
     # ------------------------------------------------------------------
     def _assert_staging_writable(self) -> None:

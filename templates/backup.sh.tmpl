@@ -3,6 +3,10 @@
 # Re-run the bootstrap to regenerate this file, or edit the variables below.
 set -euo pipefail
 
+# Restrictive umask so SQL dumps, tar archives, and the log file never land
+# as 0644 — the artifacts contain raw database data and must stay root-only.
+umask 0077
+
 REMOTE_URI="@REMOTE_URI@"
 RETENTION_DAYS="@RETENTION_DAYS@"
 BACKUP_MODE="@BACKUP_MODE@"
@@ -23,6 +27,7 @@ STAMP=$(date +%Y-%m-%d_%H%M%S)
 RUN_OK=1
 RUN_PARTIAL=0
 RUN_SUMMARY=""
+TMPDIR=""
 
 notify() {
     # notify EVENT SEVERITY SUBJECT BODY
@@ -35,8 +40,17 @@ notify() {
         --context "host=$HOST" --context "ip=$PUBLIC_IP" >/dev/null 2>&1 || true
 }
 
+# Scrub the snapshot workdir on every exit path — normal return, error,
+# or signal — so a killed run can't leave a tar full of raw DB dumps in /tmp.
+cleanup_tmpdir() {
+    if [[ -n "$TMPDIR" && -d "$TMPDIR" ]]; then
+        rm -rf "$TMPDIR"
+    fi
+}
+
 on_exit() {
     local rc=$?
+    cleanup_tmpdir
     if [[ $rc -ne 0 && $RUN_OK -eq 1 ]]; then
         notify "backup.failure" "error" \
             "backup FAILED on $HOST" \
@@ -45,6 +59,9 @@ on_exit() {
     return $rc
 }
 trap on_exit EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
 
 {
     printf '===== %s starting backup on %s (%s) via @PROVIDER_NAME@ =====\n' \
@@ -108,7 +125,6 @@ trap on_exit EXIT
             -czf "$ARCHIVE" "${SOURCES[@]}" || tar_rc=$?
         if [[ "$tar_rc" -gt 1 ]]; then
             printf 'tar failed with exit code %d\n' "$tar_rc"
-            rm -rf "$TMPDIR"
             RUN_OK=0
             exit "$tar_rc"
         fi
@@ -116,7 +132,6 @@ trap on_exit EXIT
 
         rclone copy "$ARCHIVE" "${REMOTE_URI}/" \
             --log-level INFO --stats 30s --transfers 2
-        rm -rf "$TMPDIR"
 
         rclone delete "$REMOTE_URI/" \
             --min-age "${RETENTION_DAYS}d" --log-level INFO || true

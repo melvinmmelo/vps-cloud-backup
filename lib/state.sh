@@ -4,6 +4,13 @@
 
 # Load previous answers into the current shell. Called once, before the phases.
 state_load() {
+    # Make sure the state directory is root-only even if it pre-existed
+    # with loose perms from a manual install or a previous tool version.
+    if [[ -d "$STATE_DIR" ]]; then
+        chown root:root "$STATE_DIR" 2>/dev/null || true
+        chmod 700 "$STATE_DIR"
+    fi
+
     if [[ -r "$STATE_FILE" ]]; then
         local perms owner
         perms=$(stat -c '%a' "$STATE_FILE" 2>/dev/null || echo "")

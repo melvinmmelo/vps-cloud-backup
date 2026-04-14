@@ -15,7 +15,14 @@ write_secure_conf() {
     local dir
     dir=$(dirname "$dest")
     mkdir -p "$dir"
+    chown root:root "$dir" 2>/dev/null || true
     chmod 700 "$dir"
+
+    # Close the 0644 window where cat > "$tmp" would otherwise briefly
+    # leave the tempfile readable before the chmod 600 below.
+    local old_umask
+    old_umask=$(umask)
+    umask 0077
 
     local tmp
     tmp=$(mktemp "${dest}.XXXXXX")
@@ -23,6 +30,7 @@ write_secure_conf() {
     chown root:root "$tmp"
     chmod 600 "$tmp"
     mv "$tmp" "$dest"
+    umask "$old_umask"
 
     local perms owner code
     perms=$(stat -c '%a' "$dest")

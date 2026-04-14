@@ -52,12 +52,34 @@ provider_s3_configure() {
     # appear on argv (where `ps` would expose them). `rclone config create`
     # takes key=value on argv, which is unsafe for secrets.
     local rclone_conf="${HOME:-/root}/.config/rclone/rclone.conf"
-    mkdir -p "$(dirname "$rclone_conf")"
-    touch "$rclone_conf"
+    local rclone_dir
+    rclone_dir=$(dirname "$rclone_conf")
+
+    # 0077 umask closes every window where mktemp / touch / awk could
+    # create a file at 0644 before the explicit chmod fires.
+    local old_umask
+    old_umask=$(umask)
+    umask 0077
+
+    mkdir -p "$rclone_dir"
+    chmod 700 "$rclone_dir"
+    # Also tighten the parent (~/.config) so directory listing is root-only.
+    chmod 700 "$(dirname "$rclone_dir")" 2>/dev/null || true
+
+    # Create the file if missing and immediately lock it down. The existing
+    # file (if any) is chmodded before awk reads it so its contents are
+    # never briefly world-readable mid-operation.
+    if [[ ! -e "$rclone_conf" ]]; then
+        : > "$rclone_conf"
+    fi
     chmod 600 "$rclone_conf"
 
     local tmp
-    tmp=$(mktemp "${rclone_conf}.XXXXXX")
+    tmp=$(mktemp "${rclone_conf}.XXXXXX") || {
+        umask "$old_umask"
+        err "mktemp failed next to $rclone_conf"
+        return 1
+    }
     # Strip any pre-existing section for this remote, then append the new one.
     awk -v name="$REMOTE_NAME" '
         BEGIN { skip = 0 }
@@ -79,6 +101,7 @@ provider_s3_configure() {
 
     chmod 600 "$tmp"
     mv "$tmp" "$rclone_conf"
+    umask "$old_umask"
     log "wrote rclone remote '${REMOTE_NAME}' (secrets stayed out of argv)"
 }
 

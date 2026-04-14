@@ -41,8 +41,12 @@ install_backup_script() {
         NOTIFY_ENABLED      "$notify_enabled" \
         NOTIFICATIONS_CONF  "$NOTIFICATIONS_CONF_FILE"
 
-    chmod 755 "$BACKUP_SCRIPT"
+    chmod 750 "$BACKUP_SCRIPT"
 
-    touch "$BACKUP_LOG"
+    # systemd runs as root, so 750 is enough; world-read would only leak
+    # the schedule / source paths to local users and buys nothing.
+    if [[ ! -e "$BACKUP_LOG" ]]; then
+        ( umask 0137; : > "$BACKUP_LOG" )
+    fi
     chmod 640 "$BACKUP_LOG"
 }
