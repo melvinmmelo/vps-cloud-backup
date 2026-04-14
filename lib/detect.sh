@@ -71,9 +71,16 @@ detect_public_ip() {
         http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip \
         2>/dev/null || true)
 
-    # Public fallbacks
-    [[ -z "$PUBLIC_IP" ]] && PUBLIC_IP=$(curl -s -m 5 https://ifconfig.me 2>/dev/null || true)
-    [[ -z "$PUBLIC_IP" ]] && PUBLIC_IP=$(curl -s -m 5 https://api.ipify.org 2>/dev/null || true)
+    # Public fallbacks — force IPv4 first so we match what cloud dashboards show.
+    # On a dual-stack host, curl's default is "whatever routes first," which
+    # often ends up being IPv6 and echoes back an address that doesn't match
+    # the user's mental model of "my VPS IP."
+    [[ -z "$PUBLIC_IP" ]] && PUBLIC_IP=$(curl -4 -s -m 5 https://ifconfig.me 2>/dev/null || true)
+    [[ -z "$PUBLIC_IP" ]] && PUBLIC_IP=$(curl -4 -s -m 5 https://api.ipify.org 2>/dev/null || true)
+
+    # IPv6-only fallback — only reached if every IPv4 attempt above failed.
+    [[ -z "$PUBLIC_IP" ]] && PUBLIC_IP=$(curl -6 -s -m 5 https://ifconfig.me 2>/dev/null || true)
+    [[ -z "$PUBLIC_IP" ]] && PUBLIC_IP=$(curl -6 -s -m 5 https://api6.ipify.org 2>/dev/null || true)
 
     PUBLIC_IP=${PUBLIC_IP:-unknown}
 }
