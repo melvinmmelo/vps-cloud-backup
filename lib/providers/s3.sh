@@ -42,10 +42,17 @@ provider_s3_configure() {
         return 1
     fi
 
+    # An rclone remote with this name already exists. We keep it untouched
+    # unless the user passed --force-reconfigure, so that a bootstrap re-run
+    # can never silently overwrite credentials the user configured by hand
+    # (or via a previous bootstrap) for the same remote name.
     if rclone listremotes 2>/dev/null | grep -q "^${REMOTE_NAME}:$"; then
         if [[ $FORCE_RECONFIGURE -eq 0 ]]; then
-            log "rclone remote '${REMOTE_NAME}' already exists — rewriting."
+            log "rclone remote '${REMOTE_NAME}' already exists — keeping existing config."
+            log "use --force-reconfigure to rewrite it with the values just entered."
+            return 0
         fi
+        warn "--force-reconfigure: rewriting existing rclone remote '${REMOTE_NAME}'."
     fi
 
     # Write directly to rclone.conf so the access key and secret key never

@@ -16,6 +16,7 @@ from ..errors import (
     DumperConnectionError,
     DumperDiscoveryError,
     DumperDumpFailed,
+    DumperError,
 )
 from ..result import DumpResult
 from .base import Dumper
@@ -80,7 +81,7 @@ class MySQLDumper(Dumper):
         started = time.monotonic()
         try:
             size = self._stream_to_gzip(argv, out, env=self._client_env())
-        except Exception as exc:
+        except (DumperError, OSError) as exc:
             self._logger.error(
                 "mysql dump failed for %s: %s", database, exc
             )

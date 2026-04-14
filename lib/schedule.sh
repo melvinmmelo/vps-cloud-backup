@@ -3,6 +3,25 @@
 # Offers four presets: every 3 days (default, monotonic), daily, weekly,
 # or custom. Custom is validated with `systemd-analyze calendar`.
 
+# _schedule_prompt_runtime DEFAULT PROMPT_TEXT
+# Prompts for a HH:MM time-of-day and re-asks until the user enters a
+# 24-hour value in the form HH:MM. Writes the accepted value into the
+# global RUNTIME (via ask_default). Fails fast in --yes mode if the
+# state-loaded RUNTIME is not already valid so we never emit a bad
+# OnCalendar line to the timer unit.
+_schedule_prompt_runtime() {
+    local default=$1 prompt=$2
+    while :; do
+        ask_default RUNTIME "$default" "$prompt"
+        if [[ "$RUNTIME" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]]; then
+            return 0
+        fi
+        warn_code VCB-BOOT-070 "invalid time-of-day: '$RUNTIME' (expected HH:MM, 24h)"
+        [[ $YES_MODE -eq 1 ]] && err_code VCB-BOOT-070 "cannot prompt in --yes mode"
+        RUNTIME=""
+    done
+}
+
 schedule_prompt() {
     ask_choice SCHEDULE_PRESET "Backup schedule" \
         "every3days|Every 3 days (recommended, monotonic timer)" \
@@ -19,10 +38,10 @@ schedule_prompt() {
             state_set RUNTIME ""
             ;;
         daily)
-            ask_default RUNTIME "02:30" "Time of day (HH:MM, 24h)"
+            _schedule_prompt_runtime "02:30" "Time of day (HH:MM, 24h)"
             ;;
         weekly)
-            ask_default RUNTIME "03:00" "Time of day on Sunday (HH:MM, 24h)"
+            _schedule_prompt_runtime "03:00" "Time of day on Sunday (HH:MM, 24h)"
             ;;
         custom)
             while :; do

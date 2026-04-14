@@ -402,6 +402,24 @@ if [[ -n "$RECONFIGURE_SECTION" ]]; then
     exit 0
 fi
 
+# Existing install detected on a non-reconfigure run. Warn before redoing
+# all 10 phases (fresh timeshift snapshot, full Python reinstall, rclone
+# remote rewrite). Most users who run bootstrap.sh a second time actually
+# want --reconfigure SECTION to target just the thing they changed.
+if [[ -r "$STATE_FILE" ]]; then
+    warn "Existing install detected at ${STATE_FILE}."
+    warn "A full bootstrap re-run will redo every phase, including a new"
+    warn "pre-install snapshot, a Python package reinstall, and a remote"
+    warn "re-verify. To change a single setting use:"
+    warn "    sudo ./bootstrap.sh --reconfigure SECTION"
+    warn "    (sections: ${VCB_RECONFIGURE_SECTIONS[*]})"
+    ask_yes_no _FULL_RERUN "n" "Proceed with a full re-run anyway?"
+    if [[ "$_FULL_RERUN" != "y" ]]; then
+        log "aborted — use --reconfigure SECTION to target a single setting"
+        exit 0
+    fi
+fi
+
 phase_1_detect
 phase_2_confirm_env
 phase_2b_system_snapshot

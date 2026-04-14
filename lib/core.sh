@@ -57,25 +57,38 @@ require_root() {
 
 # render_template SRC DEST KEY1 VAL1 KEY2 VAL2 ...
 # Substitutes every @KEY@ in SRC with VAL, writes the result to DEST.
-# Uses `|` as the sed delimiter; `|` and `&` in values are escaped so they
-# cannot break out of the substitution.
+# Uses bash literal substitution (${content//needle/replacement}) so no
+# character in VAL — including $, backtick, double-quote, newline, or
+# sed metacharacters — can break out of the replacement or confuse the
+# substitution engine. Note: VALs that happen to contain shell
+# metacharacters still land verbatim in the output file, so callers
+# writing to shell scripts must validate inputs at prompt time if the
+# target context is unquoted.
+#
+# The substitution runs in a subshell so `shopt -u patsub_replacement`
+# is local: bash 5.2+ enables that shopt by default, and with it a bare
+# `&` in the replacement string expands to the matched pattern (e.g. a
+# value of `foo&bar` becomes `foo@KEY@bar`). Disabling it makes every
+# character in VAL land verbatim. On bash < 5.2 the option does not
+# exist and `shopt -u` is a silent no-op, so the same code works there.
 render_template() {
     local src=$1 dst=$2
     shift 2
     if [[ ! -r "$src" ]]; then
         err_code VCB-BOOT-040 "template not readable: $src"
     fi
-    local sed_args=() key val escaped
-    while (($#)); do
-        key=$1; val=$2; shift 2
-        # Escape both the sed delimiter `|` and the replacement metacharacter `&`.
-        escaped=${val//\\/\\\\}
-        escaped=${escaped//&/\\&}
-        escaped=${escaped//|/\\|}
-        sed_args+=(-e "s|@${key}@|${escaped}|g")
-    done
-    sed "${sed_args[@]}" "$src" > "$dst" \
-        || err_code VCB-BOOT-040 "sed failed while rendering $src -> $dst"
+    (
+        shopt -u patsub_replacement 2>/dev/null || true
+        local content key val
+        content=$(<"$src") || exit 1
+        while (($#)); do
+            key=$1; val=$2; shift 2
+            content=${content//@${key}@/${val}}
+        done
+        # $(<FILE) strips trailing newlines; restore one so the output
+        # file ends cleanly (systemd units and shell scripts expect it).
+        printf '%s\n' "$content"
+    ) > "$dst" || err_code VCB-BOOT-040 "render failed: $src -> $dst"
 }
 
 parse_args() {
