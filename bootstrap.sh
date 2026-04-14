@@ -83,7 +83,9 @@ phase_1_detect() {
     ensure_cmd curl curl
     detect_cloud
     detect_public_ip
-    [[ "$PUBLIC_IP" == "unknown" ]] && warn_code VCB-BOOT-004 "public IP unknown"
+    if [[ "$PUBLIC_IP" == "unknown" ]]; then
+        warn_code VCB-BOOT-004 "public IP unknown"
+    fi
 }
 
 phase_2_confirm_env() {
@@ -98,7 +100,10 @@ phase_2_confirm_env() {
 
 EOF
     ask_yes_no _GO "y" "Proceed with these values?"
-    [[ "$_GO" == "n" ]] && { warn "aborted by user"; exit 0; }
+    if [[ "$_GO" == "n" ]]; then
+        warn "aborted by user"
+        exit 0
+    fi
 }
 
 # ============================================================================
